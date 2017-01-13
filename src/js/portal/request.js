@@ -4,13 +4,23 @@ function get(url, parameters, options) {
     return new Promise(function(resolve, reject) {
 
         let xhr = new XMLHttpRequest();
-        xhr.responseType = "json";
+        // xhr.responseType = "json"; // Can't use this until IE11 supports it.
         xhr.withCredentials = options.withCredentials;
 
         xhr.addEventListener("readystatechange", function() {
             if (xhr.readyState === 4 && xhr.status == 200) {
+                // Handle empty responses.
+                let response;
+                if (xhr.response === "") {
+                    response = null;
+                } else {
+                    response = JSON.parse(xhr.response);
+                }
+
                 // Resolve the promise with the response.
-                resolve(xhr.response);
+                resolve(response);
+            } else if (xhr.readyState === 4 && xhr.status == 500) {
+                reject(Error(xhr));
             }
         });
 
@@ -19,6 +29,14 @@ function get(url, parameters, options) {
         });
 
         xhr.open("GET", `${url}?${serialize(parameters)}`);
+
+        // Reject the request after 120 seconds.
+        xhr.timeout = 120000;
+        xhr.ontimeout = function() {
+            console.log("timeout");
+            reject(Error(xhr));
+        };
+
         xhr.send();
     });
 
@@ -31,13 +49,23 @@ function post(url, data, options) {
     return new Promise(function(resolve, reject) {
 
         let xhr = new XMLHttpRequest();
-        xhr.responseType = "json";
+        // xhr.responseType = "json"; // Can't use this until IE11 supports it.
         xhr.withCredentials = options.withCredentials;
 
         xhr.addEventListener("readystatechange", function() {
             if (xhr.readyState === 4 && xhr.status == 200) {
+                // Handle empty responses.
+                let response;
+                if (xhr.response === "") {
+                    response = null;
+                } else {
+                    response = JSON.parse(xhr.response);
+                }
+
                 // Resolve the promise with the response.
-                resolve(xhr.response);
+                resolve(response);
+            } else if (xhr.readyState === 4 && xhr.status == 500) {
+                reject(Error(xhr));
             }
         });
 
@@ -46,6 +74,14 @@ function post(url, data, options) {
         });
 
         xhr.open("POST", url);
+
+        // Reject the request after 120 seconds.
+        xhr.timeout = 120000;
+        xhr.ontimeout = function() {
+            console.log("timeout");
+            reject(Error(xhr));
+        };
+
         xhr.setRequestHeader("content-type", "application/x-www-form-urlencoded");
         xhr.send(serialize(data));
     });

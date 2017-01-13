@@ -6,6 +6,7 @@ require([
     "esri/arcgis/Portal",
     "esri/arcgis/OAuthInfo",
     "esri/IdentityManager",
+    "clipboard",
     "highlight",
     "jquery.ui",
     "bootstrap-shim"
@@ -17,6 +18,7 @@ require([
     arcgisPortal,
     arcgisOAuthInfo,
     esriId,
+    Clipboard,
     hljs
 ) {
 
@@ -57,7 +59,7 @@ require([
             portal.portalUrl = portalUrl;
             portal.version()
                 .then(function(data) {
-                    console.log("API v" + data.currentVersion);
+                    console.info("API v" + data.currentVersion);
                     jquery(".alert-danger.alert-dismissable").remove();
                     jquery(el).next().addClass("glyphicon-ok");
                 })
@@ -66,7 +68,7 @@ require([
                     portal.withCredentials = true;
                     portal.version()
                         .then(function(data) {
-                            console.log("API v" + data.currentVersion);
+                            console.info("API v" + data.currentVersion);
                             jquery(".alert-danger.alert-dismissable").remove();
                             jquery(el).next().addClass("glyphicon-ok");
                             jquery(checkbox).trigger("click");
@@ -77,7 +79,7 @@ require([
                             portal.version().then(function(data) {
                                 // It worked so keep enterprise auth but turn jsonp back off.
                                 portal.jsonp = false;
-                                console.log("API v" + data.currentVersion);
+                                console.info("API v" + data.currentVersion);
                                 jquery(".alert-danger.alert-dismissable").remove();
                                 jquery(el).next().addClass("glyphicon-ok");
                             }).catch(function() {
@@ -285,6 +287,27 @@ require([
         var portal;
         var jsonBackup;
         var jsonValid;
+
+        // Copy JSON with clipboard.js.
+        var clipboard = new Clipboard(".btn");
+        clipboard.on("success", function(e) {
+
+            var el = jquery(e.trigger);
+
+            el.tooltip({
+                title: "Copied!",
+                placement: "left",
+                container: "body"
+            });
+            el.tooltip("show");
+
+            // Destroy the tooltip so it doesn't keep popping up.
+            el.mouseleave(function() {
+                el.tooltip("destroy");
+            });
+
+            e.clearSelection();
+        });
 
         var validateJson = function(jsonString) {
             try {
@@ -575,9 +598,13 @@ require([
                 .then(function(data) {
                     webmapData = JSON.stringify(data);
                     var operationalLayers = [];
-                    jquery.each(data.operationalLayers, function(layer) {
-                        if (data.operationalLayers[layer].hasOwnProperty("url")) {
-                            operationalLayers.push(data.operationalLayers[layer]);
+                    jquery.each(data.operationalLayers, function() {
+                        if (this.hasOwnProperty("url")) {
+                            operationalLayers.push(this);
+                        } else if (this.hasOwnProperty("styleUrl")) {
+                            // Support updating Vector Tile Styles.
+                            this.url = this.styleUrl;
+                            operationalLayers.push(this);
                         }
                     });
 
@@ -592,9 +619,13 @@ require([
 
                     var basemapTitle = data.baseMap.title;
                     var basemapLayers = [];
-                    jquery.each(data.baseMap.baseMapLayers, function(layer) {
-                        if (data.baseMap.baseMapLayers[layer].hasOwnProperty("url")) {
-                            basemapLayers.push(data.baseMap.baseMapLayers[layer]);
+                    jquery.each(data.baseMap.baseMapLayers, function() {
+                        if (this.hasOwnProperty("url")) {
+                            basemapLayers.push(this);
+                        } else if (this.hasOwnProperty("styleUrl")) {
+                            // Support updating Vector Tile Styles.
+                            this.url = this.styleUrl;
+                            basemapLayers.push(this);
                         }
                     });
 
@@ -729,7 +760,7 @@ require([
     var updateContentUrls = function() {
         var owner;
         var folder;
-        var supportedContent = jquery(".content[data-type='Feature Service'], .content[data-type='Map Service'], .content[data-type='Image Service'], .content[data-type='KML'], .content[data-type='WMS'], .content[data-type='Geodata Service'], .content[data-type='Globe Service'], .content[data-type='Geometry Service'], .content[data-type='Geocoding Service'], .content[data-type='Network Analysis Service'], .content[data-type='Geoprocessing Service'], .content[data-type='Web Mapping Application'], .content[data-type='Mobile Application'], .content[data-type='Scene Service']");
+        var supportedContent = jquery(".content[data-type='Feature Service'], .content[data-type='Map Service'], .content[data-type='Image Service'], .content[data-type='KML'], .content[data-type='WMS'], .content[data-type='Geodata Service'], .content[data-type='Globe Service'], .content[data-type='Geometry Service'], .content[data-type='Geocoding Service'], .content[data-type='Network Analysis Service'], .content[data-type='Geoprocessing Service'], .content[data-type='Web Mapping Application'], .content[data-type='Mobile Application'], .content[data-type='Scene Service'], .content[data-type='Vector Tile Service']");
         var portal = app.portals.sourcePortal;
 
         // Highlight supported content.
@@ -1030,17 +1061,22 @@ require([
         var serviceDescription = item[0].serviceDescription;
         var layers = serviceDescription.layers;
 
-        // Preserve the icon on the cloned button.
+        // Preserve the icon and label on the cloned button.
+        var clone = jquery("#" + id + "_clone");
         var span = jquery("#" + id + "_clone > span");
-        jquery("#" + id + "_clone").text(name);
-        jquery("#" + id + "_clone").prepend(span);
+
+        clone.text(name);
+        clone.prepend(span);
+        clone.addClass("btn-info");
+        clone.append("<div class='message'><p class='messages'></p></div>");
+
+        var messages = jquery("#" + id + "_clone").find(".messages");
         serviceDescription.name = name;
         var serviceDefinition = serviceDescription;
         delete serviceDefinition.layers;
+        messages.text("creating service");
+        messages.after("<img src='css/grid.svg' class='harvester'/>");
         destinationPortal.createService(destinationPortal.username, folder, JSON.stringify(serviceDefinition)).then(function(service) {
-            var clone = jquery("#" + id + "_clone");
-            clone.addClass("btn-info");
-            clone.append("<img src='css/grid.svg' class='harvester'/>");
             clone.attr("data-id", service.itemId);
             clone.attr("data-portal", destinationPortal.portalUrl);
 
@@ -1049,27 +1085,80 @@ require([
 
             // Update the new item's tags to make it easier to trace its origins.
             var newTags = description.tags;
-            newTags.push("source-" + description.id);
-            destinationPortal.updateDescription(destinationPortal.username, service.itemId, folder, JSON.stringify({
-                tags: newTags
-            }));
+            newTags.push("sourceId-" + description.id);
+            newTags.push("copied with ago-assistant");
+            destinationPortal.updateDescription(destinationPortal.username, service.itemId, folder, JSON.stringify({tags: newTags}));
+
             portal.serviceLayers(description.url)
                 .then(function(definition) {
-                    /*
-                     * Force in the spatial reference.
-                     * Don't know why this is necessary, but if you
-                     * don't then any geometries not in 102100 end up
-                     * on Null Island.
-                     */
+                    var layerCount = definition.layers.length;
+                    var layerJobs = {};
+                    var layerSummary = {};
+                    // var totalRecords = 0; // Keep track of the total records for the entire service.
+                    // var totalAdded = 0; // Keep track of the total successfully added records.
+                    var reportResult = function(layerId) {
+                        // Check if the current layer's requests have all finished.
+                        // Using 'attempted' handles both successes and failures.
+                        if (layerJobs[layerId].attempted >= layerJobs[layerId].recordCount) {
+                            layerSummary[layerId] = layerJobs[layerId];
+                            delete layerJobs[layerId];
+                        }
+
+                        // Check if all layers have completed.
+                        if (Object.keys(layerJobs).length === 0) {
+                            var errors = false;
+                            console.info("Copy summary for " + name);
+                            Object.keys(layerSummary).forEach(function(k) {
+                                // Check for errors and log to the console.
+                                var layer = layerSummary[k];
+                                if (layer.added !== layer.recordCount) {
+                                    errors = true;
+                                    console.warn(k + " (" + layer.name + "): Added " + layer.added.toLocaleString([]) + "/" + layer.recordCount.toLocaleString([]) + " records");
+                                } else {
+                                    console.info(k + " (" + layer.name + "): Added " + layer.added.toLocaleString([]) + "/" + layer.recordCount.toLocaleString([]) + " records");
+                                }
+                            });
+
+                            clone.find("img").remove();
+                            clone.removeClass("btn-info");
+                            if (errors) {
+                                clone.addClass("btn-warning");
+                                messages.text("Incomplete--check console");
+                            } else {
+                                clone.addClass("btn-success");
+                                messages.text("Copy OK");
+                            }
+                        }
+                    };
+
                     jquery.each(definition.layers, function(i, layer) {
+
+                        // Set up an object to track the copy status for this layer.
+                        layerJobs[layer.id] = {name: layer.name, recordCount: 0, attempted: 0, added: 0};
+
+                        /*
+                        * Force in the spatial reference.
+                        * Don't know why this is necessary, but if you
+                        * don't then any geometries not in 102100 end up
+                        * on Null Island.
+                        */
                         layer.adminLayerInfo = {
                             geometryField: {
                                 name: "Shape",
                                 srid: 102100
                             }
                         };
+
+                        /*
+                         * Clear out the layer's indexes.
+                         * This prevents occasional critical  errors on the addToServiceDefinition call.
+                         * The indexes will automatically be created when the new service is published.
+                         */
+                        layer.indexes = [];
                     });
 
+
+                    messages.text("updating definition");
                     destinationPortal.addToServiceDefinition(service.serviceurl, JSON.stringify(definition))
                         .then(function(response) {
                             if (!("error" in response)) {
@@ -1078,26 +1167,33 @@ require([
                                     portal.layerRecordCount(description.url, layerId)
                                         .then(function(records) {
                                             var offset = 0;
-
+                                            layerJobs[layerId].recordCount = records.count;
                                             // Set the count manually in weird cases where maxRecordCount is negative.
                                             var count = definition.layers[layerId].maxRecordCount < 1 ? 1000 : definition.layers[layerId].maxRecordCount;
-                                            var added = 0;
                                             var x = 1; // eslint-disable-line no-unused-vars
                                             while (offset <= records.count) {
                                                 x++;
+                                                messages.text("harvesting data");
                                                 portal.harvestRecords(description.url, layerId, offset, count)
                                                     // the linter doesn't like anonymous callback functions within loops
                                                     /* eslint-disable no-loop-func */
                                                     .then(function(serviceData) {
+                                                        messages.text("adding features for " + layerCount + " layers");
                                                         destinationPortal.addFeatures(service.serviceurl, layerId, JSON.stringify(serviceData.features))
-                                                            .then(function() {
-                                                                added += count;
-                                                                if (added >= records.count) {
-                                                                    jquery("#" + id + "_clone > img").remove();
-                                                                    jquery("#" + id + "_clone").removeClass("btn-info");
-                                                                    jquery("#" + id + "_clone").addClass("btn-success");
-                                                                }
+                                                            .then(function(result) {
+                                                                layerJobs[layerId].attempted += serviceData.features.length;
+                                                                layerJobs[layerId].added += result.addResults.length;
+                                                                reportResult(layerId);
+                                                            })
+                                                            .catch(function() { // Catch on addFeatures.
+                                                                layerJobs[layerId].attempted += serviceData.features.length;
+                                                                reportResult(layerId);
                                                             });
+                                                    })
+                                                    .catch(function() { // Catch on harvestRecords.
+                                                        messages.text("Incomplete—check console");
+                                                        console.info("Errors creating service " + name);
+                                                        console.info("Failed to retrieve all records.");
                                                     });
                                                     /* eslint-enable no-loop-func */
                                                 offset += count;
@@ -1105,19 +1201,24 @@ require([
                                         });
                                 });
                             } else {
-                                jquery("#" + id + "_clone > img").remove();
-                                jquery("#" + id + "_clone").removeClass("btn-info");
-                                jquery("#" + id + "_clone").addClass("btn-danger");
-                                var message = response.error.message;
-                                showCopyError(id, message);
+                                clone.find("img").remove();
+                                clone.removeClass("btn-info");
+                                clone.addClass("btn-danger");
+                                messages.text("Failed—check console");
+                                console.info("Copy summary for " + name);
+                                console.warn(response.error.message);
+                                response.error.details.forEach(function(detail) {
+                                    console.warn(detail);
+                                });
                             }
                         })
-                        .catch(function() {
-                            jquery("#" + id + "_clone > img").remove();
-                            jquery("#" + id + "_clone").removeClass("btn-info");
-                            jquery("#" + id + "_clone").addClass("btn-danger");
-                            var message = "Something went wrong.";
-                            showCopyError(id, message);
+                        .catch(function() { // Catch on addToServiceDefinition.
+                            clone.find("img").remove();
+                            clone.removeClass("btn-info");
+                            clone.addClass("btn-danger");
+                            messages.text("Failed—check console");
+                            console.info("Errors creating service " + name);
+                            console.warn("Failed to create the service.");
                         });
                 });
         });
@@ -1332,7 +1433,8 @@ require([
             "Symbol Set",
             "Color Set",
             "Document Link",
-            "Feature Service"
+            "Feature Service",
+            "Vector Tile Service"
         ];
         if (jquery.inArray(type, supportedTypes) > -1) {
             return true;
